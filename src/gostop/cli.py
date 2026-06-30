@@ -45,6 +45,7 @@ def main() -> None:
     p_holiday.add_argument("--base-date", default=date.today().strftime("%Y%m%d"))
 
     sub.add_parser("collect-balance")
+    sub.add_parser("recompute-cash")
     p_sync_exec = sub.add_parser("sync-executions")
     p_sync_exec.add_argument("--date", default=date.today().isoformat())
 
@@ -161,6 +162,8 @@ def main() -> None:
         print(f"holiday_rows={collector.collect_holidays(args.base_date)}")
     elif args.command == "collect-balance":
         print(f"balance_rows={collector.collect_balance()}")
+    elif args.command == "recompute-cash":
+        print(f"account_cash_rows={store.recompute_account_cash_amounts()}")
     elif args.command == "sync-executions":
         result = AccountSync(settings, client, store).sync_daily_executions(args.date)
         print(

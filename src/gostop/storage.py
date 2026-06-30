@@ -461,7 +461,7 @@ class Store:
                         collected_at,
                         to_float(row.get("tot_evlu_amt")),
                         to_float(row.get("nass_amt")),
-                        to_float(row.get("dnca_tot_amt")),
+                        account_cash_amount(row),
                         to_float(row.get("scts_evlu_amt")),
                         to_float(row.get("pchs_amt_smtl_amt")),
                         to_float(row.get("evlu_pfls_smtl_amt")),
@@ -643,6 +643,34 @@ class Store:
                 (order_id,),
             ).fetchone()
         return str(row["status"]) if row else None
+
+    def recompute_account_cash_amounts(self) -> int:
+        updated = 0
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                select rowid, raw_json
+                from account_snapshots
+                """
+            ).fetchall()
+            for row in rows:
+                try:
+                    payload = json.loads(row["raw_json"])
+                except json.JSONDecodeError:
+                    continue
+                cash_amount = account_cash_amount(payload)
+                if cash_amount is None:
+                    continue
+                conn.execute(
+                    """
+                    update account_snapshots
+                    set cash_amount = ?
+                    where rowid = ?
+                    """,
+                    (cash_amount, row["rowid"]),
+                )
+                updated += 1
+        return updated
 
     def replace_strategy_plan(
         self,
@@ -884,6 +912,21 @@ def to_int(value: Any) -> int | None:
         return int(float(str(value).replace(",", "")))
     except ValueError:
         return None
+
+
+def account_cash_amount(row: dict[str, Any]) -> float | None:
+    total_eval = to_float(row.get("tot_evlu_amt"))
+    if total_eval is None:
+        total_eval = to_float(row.get("nass_amt"))
+    securities_value = to_float(row.get("scts_evlu_amt"))
+    if total_eval is not None and securities_value is not None:
+        return max(0.0, total_eval - securities_value)
+
+    for key in ("prvs_rcdl_excc_amt", "nxdy_excc_amt", "dnca_tot_amt"):
+        value = to_float(row.get(key))
+        if value is not None:
+            return value
+    return None
 
 
 def normalize_trade_date(value: Any) -> str:
