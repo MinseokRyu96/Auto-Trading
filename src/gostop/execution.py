@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
+from .account_sync import AccountSync
 from .config import Settings
 from .kis_client import KisClient, KisApiError
 from .storage import Store
@@ -25,6 +27,7 @@ class TradingExecutor:
         self.settings = settings
         self.client = client
         self.store = store
+        self.account_sync = AccountSync(settings, client, store)
 
     def execute_latest_plan(self, live: bool = False, confirm_live: bool = False) -> ExecutionResult:
         if live:
@@ -56,12 +59,16 @@ class TradingExecutor:
                 self._record_guard_skip(order, "daily order limit exceeded")
                 skipped += 1
                 continue
-            total_order_value += order_value
 
             if live:
+                order = self._fit_buy_order_to_orderable_cash(order)
+                if order is None:
+                    skipped += 1
+                    continue
                 self._place_order(order)
             else:
                 self._record_dry_run(order)
+            total_order_value += float(order["order_value"] or 0)
             submitted += 1
 
         return ExecutionResult(submitted=submitted, skipped=skipped, mode="live" if live else "dry-run")
@@ -75,12 +82,41 @@ class TradingExecutor:
                 where trade_date = ?
                   and symbol = ?
                   and side = ?
-                  and status in ('submitting', 'submitted')
+                  and status not like 'failed:%'
+                  and status not like 'guard_skip:%'
+                  and status != 'dry_run'
                 limit 1
                 """,
                 (date.today().isoformat(), str(order["symbol"]), str(order["side"])),
             ).fetchone()
             return row is not None
+
+    def _fit_buy_order_to_orderable_cash(self, order: dict[str, Any]) -> dict[str, Any] | None:
+        if order["side"] != "buy":
+            return order
+
+        price = float(order["price"] or 0)
+        planned_quantity = int(float(order["quantity"] or 0))
+        if price <= 0 or planned_quantity <= 0:
+            return None
+
+        orderable = self.account_sync.inquire_orderable_cash(str(order["symbol"]), price)
+        amount_quantity = math.floor((orderable.amount * 0.995) / price) if orderable.amount > 0 else 0
+        allowed_quantity = min(planned_quantity, orderable.quantity or planned_quantity, amount_quantity)
+        if allowed_quantity <= 0:
+            self._record_guard_skip(order, "orderable cash unavailable")
+            return None
+        if allowed_quantity == planned_quantity:
+            return order
+
+        adjusted = dict(order)
+        adjusted["quantity"] = allowed_quantity
+        adjusted["order_value"] = round(allowed_quantity * price, 2)
+        adjusted["reason"] = (
+            f"{order.get('reason') or ''}; 주문가능금액 기준 수량 조정 "
+            f"{planned_quantity}주 -> {allowed_quantity}주"
+        ).strip("; ")
+        return adjusted
 
     def _assert_live_allowed(self, confirm_live: bool) -> None:
         if not self.settings.is_real:

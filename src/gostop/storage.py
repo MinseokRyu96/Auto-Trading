@@ -19,8 +19,11 @@ class Store:
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30)
         conn.row_factory = sqlite3.Row
+        conn.execute("pragma journal_mode=WAL")
+        conn.execute("pragma busy_timeout=30000")
+        conn.execute("pragma foreign_keys=ON")
         try:
             yield conn
             conn.commit()
@@ -259,6 +262,21 @@ class Store:
                     raw_json text not null,
                     unique(url, symbol)
                 );
+
+                create index if not exists idx_order_events_order_id
+                    on order_events(order_id, event_time);
+
+                create index if not exists idx_order_events_trade_symbol_side
+                    on order_events(trade_date, symbol, side, status);
+
+                create index if not exists idx_trade_executions_trade_order
+                    on trade_executions(trade_date, order_id, symbol, side);
+
+                create index if not exists idx_account_snapshots_collected_at
+                    on account_snapshots(collected_at);
+
+                create index if not exists idx_balance_snapshots_collected_at
+                    on balance_snapshots(collected_at);
                 """
             )
 
@@ -546,6 +564,85 @@ class Store:
                     raw,
                 ),
             )
+
+    def upsert_trade_execution(self, row: dict[str, Any]) -> bool:
+        execution_time = row.get("execution_time") or utc_now()
+        trade_date = normalize_trade_date(row.get("trade_date") or execution_time)
+        order_id = row.get("order_id")
+        symbol = str(row["symbol"])
+        side = normalize_side(row["side"])
+        quantity = to_float(row["quantity"]) or 0
+        price = to_float(row["price"]) or 0
+        amount = to_float(row.get("amount"))
+        if amount is None:
+            amount = quantity * price
+        raw = json.dumps(row, ensure_ascii=False)
+
+        with self.connect() as conn:
+            existing = None
+            if order_id:
+                existing = conn.execute(
+                    """
+                    select raw_json
+                    from trade_executions
+                    where trade_date = ?
+                      and order_id = ?
+                      and symbol = ?
+                      and side = ?
+                    limit 1
+                    """,
+                    (trade_date, order_id, symbol, side),
+                ).fetchone()
+                conn.execute(
+                    """
+                    delete from trade_executions
+                    where trade_date = ?
+                      and order_id = ?
+                      and symbol = ?
+                      and side = ?
+                    """,
+                    (trade_date, order_id, symbol, side),
+                )
+
+            conn.execute(
+                """
+                insert into trade_executions
+                (execution_time, trade_date, order_id, symbol, name, side, quantity, price, amount, fee, tax, realized_pnl, raw_json)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    execution_time,
+                    trade_date,
+                    order_id,
+                    symbol,
+                    row.get("name"),
+                    side,
+                    quantity,
+                    price,
+                    amount,
+                    to_float(row.get("fee")) or 0,
+                    to_float(row.get("tax")) or 0,
+                    to_float(row.get("realized_pnl")) or 0,
+                    raw,
+                ),
+            )
+        return existing is None
+
+    def latest_order_status(self, order_id: str) -> str | None:
+        if not order_id:
+            return None
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                select status
+                from order_events
+                where order_id = ?
+                order by event_time desc
+                limit 1
+                """,
+                (order_id,),
+            ).fetchone()
+        return str(row["status"]) if row else None
 
     def replace_strategy_plan(
         self,

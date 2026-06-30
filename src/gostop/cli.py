@@ -5,6 +5,7 @@ import csv
 from datetime import date, timedelta
 from pathlib import Path
 
+from .account_sync import AccountSync
 from .collector import DataCollector
 from .config import load_settings
 from .dashboard import run_dashboard
@@ -44,6 +45,8 @@ def main() -> None:
     p_holiday.add_argument("--base-date", default=date.today().strftime("%Y%m%d"))
 
     sub.add_parser("collect-balance")
+    p_sync_exec = sub.add_parser("sync-executions")
+    p_sync_exec.add_argument("--date", default=date.today().isoformat())
 
     p_all = sub.add_parser("collect-all")
     p_all.add_argument("--symbols", default="")
@@ -158,6 +161,15 @@ def main() -> None:
         print(f"holiday_rows={collector.collect_holidays(args.base_date)}")
     elif args.command == "collect-balance":
         print(f"balance_rows={collector.collect_balance()}")
+    elif args.command == "sync-executions":
+        result = AccountSync(settings, client, store).sync_daily_executions(args.date)
+        print(
+            "execution_sync executions={executions} new_executions={new_executions} status_events={status_events}".format(
+                executions=result.executions,
+                new_executions=result.new_executions,
+                status_events=result.status_events,
+            )
+        )
     elif args.command == "collect-all":
         symbols = read_symbols(args.symbols, args.symbols_file)
         end = date.today()

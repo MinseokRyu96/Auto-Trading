@@ -9,6 +9,7 @@ from datetime import date, datetime, time as clock_time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from .account_sync import AccountSync, ExecutionSyncResult
 from .collector import DataCollector
 from .config import Settings
 from .execution import TradingExecutor
@@ -49,6 +50,7 @@ class MarketRunner:
         self.collector = DataCollector(client, store, settings, pause_seconds=0.35)
         self.news_crawler = NewsCrawler(settings, store)
         self.executor = TradingExecutor(settings, client, store)
+        self.account_sync = AccountSync(settings, client, store)
         self.notifier = TelegramNotifier.from_settings(settings)
         self._last_cycle_at: datetime | None = None
         self._last_rank_date: date | None = None
@@ -106,6 +108,7 @@ class MarketRunner:
             self._last_rank_date = now.date()
             print(f"rankings volume={volume_rows} market_cap={market_cap_rows}", flush=True)
 
+        pre_sync = self._sync_executions_if_possible(now)
         news_rows = self._collect_news_if_due(now)
         symbols = load_runner_symbols(self.store, self.config.symbols_file)
         balance_rows = self.collector.collect_balance()
@@ -115,13 +118,16 @@ class MarketRunner:
             live=self.config.live,
             confirm_live=self.config.confirm_live,
         )
+        post_sync = self._sync_executions_if_possible(now)
         account = self._latest_account()
         order_events = self._order_events_since(cycle_started_at)
         print(
-            "cycle done balance={balance} quotes={quotes} news={news} regime={regime} orders={orders} submitted={submitted} skipped={skipped}".format(
+            "cycle done balance={balance} quotes={quotes} news={news} executions={executions} new_executions={new_executions} regime={regime} orders={orders} submitted={submitted} skipped={skipped}".format(
                 balance=balance_rows,
                 quotes=quote_rows,
                 news=news_rows,
+                executions=(pre_sync.executions + post_sync.executions),
+                new_executions=(pre_sync.new_executions + post_sync.new_executions),
                 regime=plan["risk_state"]["regime"],
                 orders=len(plan["orders"]),
                 submitted=result.submitted,
@@ -139,9 +145,26 @@ class MarketRunner:
                 "submitted": result.submitted,
                 "skipped": result.skipped,
                 "news_rows": news_rows,
+                "executions": pre_sync.executions + post_sync.executions,
+                "new_executions": pre_sync.new_executions + post_sync.new_executions,
             }
         )
         self.notifier.send_order_events(order_events)
+
+    def _sync_executions_if_possible(self, now: datetime) -> ExecutionSyncResult:
+        if not self.settings.cano or not self.settings.acnt_prdt_cd:
+            return ExecutionSyncResult(executions=0, new_executions=0, status_events=0)
+        try:
+            result = self.account_sync.sync_daily_executions(now.date().isoformat())
+        except Exception as exc:
+            print(f"execution sync failed: {exc}", flush=True)
+            return ExecutionSyncResult(executions=0, new_executions=0, status_events=0)
+        if result.executions or result.status_events:
+            print(
+                f"execution sync executions={result.executions} new={result.new_executions} status_events={result.status_events}",
+                flush=True,
+            )
+        return result
 
     def _collect_news_if_due(self, now: datetime) -> int:
         if not self.settings.news_enabled:

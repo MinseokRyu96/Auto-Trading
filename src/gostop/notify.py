@@ -72,6 +72,7 @@ class TelegramNotifier:
                     f"시장 상태: {risk_label(payload.get('regime'))}",
                     f"매매 상태: {'ON' if payload.get('trading_enabled') else 'OFF'}",
                     f"뉴스 반영: {payload.get('news_rows', 0)}건",
+                    f"체결 동기화: {payload.get('executions', 0)}건 / 신규 {payload.get('new_executions', 0)}건",
                     f"주문 후보: {payload.get('orders', 0)}건",
                     f"제출: {payload.get('submitted', 0)}건 / 스킵: {payload.get('skipped', 0)}건",
                 ]
@@ -146,6 +147,16 @@ def order_title(side: str, status: str) -> tuple[str, str]:
         return f"⏭️ {side_text} 주문스킵", korean_status(status)
     if status_lower == "dry_run":
         return f"🧪 {side_text} 모의주문", "모의 실행 기록"
+    if status_lower == "filled":
+        return f"✅ {side_text} 체결완료", "체결 완료"
+    if status_lower == "partial_filled":
+        return f"🟡 {side_text} 부분체결", "부분 체결"
+    if status_lower == "open":
+        return f"⏳ {side_text} 미체결", "미체결 대기"
+    if status_lower == "cancelled":
+        return f"⛔ {side_text} 취소완료", "취소 완료"
+    if status_lower == "rejected":
+        return f"⚠️ {side_text} 거부", "주문 거부"
     return f"ℹ️ {side_text} 주문상태", korean_status(status)
 
 
@@ -156,6 +167,11 @@ def korean_status(status: str) -> str:
         "dry_run": "모의 실행 기록",
         "submitted": "주문 제출 완료",
         "submitting": "주문 제출중",
+        "filled": "체결 완료",
+        "partial_filled": "부분 체결",
+        "open": "미체결 대기",
+        "cancelled": "취소 완료",
+        "rejected": "주문 거부",
     }
     if status in replacements:
         return replacements[status]

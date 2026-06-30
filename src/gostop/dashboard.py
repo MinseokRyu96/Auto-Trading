@@ -10,8 +10,9 @@ from pathlib import Path
 from typing import Any
 from urllib import parse
 
-from .config import load_settings
+from .account_sync import AccountSync
 from .collector import DataCollector
+from .config import load_settings
 from .kis_client import KisClient
 from .notify import TelegramNotifier
 from .storage import Store
@@ -361,6 +362,11 @@ def refresh_live_data(db_path: Path) -> dict[str, Any]:
     collector = DataCollector(client, store, settings, pause_seconds=0.35)
 
     symbols = latest_quote_symbols(db_path)
+    sync_result = (
+        AccountSync(settings, client, store).sync_daily_executions()
+        if settings.cano and settings.acnt_prdt_cd
+        else None
+    )
     balance_rows = collector.collect_balance()
     quote_rows = collector.collect_current_quotes(symbols) if symbols else 0
     plan = MomentumStrategy(settings, store).build_plan()
@@ -369,6 +375,8 @@ def refresh_live_data(db_path: Path) -> dict[str, Any]:
         "ok": True,
         "balance_rows": balance_rows,
         "quote_rows": quote_rows,
+        "executions": sync_result.executions if sync_result else 0,
+        "new_executions": sync_result.new_executions if sync_result else 0,
         "strategy_signals": len(plan["signals"]),
         "strategy_orders": len(plan["orders"]),
     }
