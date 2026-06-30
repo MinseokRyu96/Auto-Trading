@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>GoStop Console</title>
+    <link rel="stylesheet" href="/static/styles.css?v=20260628-trading-toggle">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="주요 메뉴">
+        <div class="brand">
+          <div class="brand-mark">GS</div>
+          <div>
+            <strong>GoStop</strong>
+            <span>Autonomous Trading Console</span>
+          </div>
+        </div>
+        <nav>
+          <a class="active" href="#overview">Overview</a>
+          <a href="#strategy">Strategy</a>
+          <a href="#learning">Learning</a>
+          <a href="#execution">Execution</a>
+          <a href="#account">Account</a>
+          <a href="#market">Market</a>
+        </nav>
+        <div id="liveTradingCard" class="side-status live-status is-disabled">
+          <div class="live-status-head">
+            <span>Live Trading</span>
+            <small id="envLabel">KIS</small>
+          </div>
+          <div class="live-status-main">
+            <i aria-hidden="true"></i>
+            <strong id="liveLockLabel" aria-label="Live Trading OFF">실주문 OFF</strong>
+          </div>
+          <small id="liveModeNote">주문 제출 차단됨</small>
+          <button id="tradingToggleButton" class="control-button" type="button">매매 켜기</button>
+        </div>
+      </aside>
+
+      <main>
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Korea Investment Open API</p>
+            <h1>Trading Operations</h1>
+          </div>
+          <div class="toolbar">
+            <div class="sync-pill">
+              <span>Last sync</span>
+              <strong id="syncTime">-</strong>
+            </div>
+            <input id="dateInput" type="date" aria-label="조회 날짜">
+            <button id="refreshButton" type="button">Refresh</button>
+          </div>
+        </header>
+
+        <section id="overview" class="status-grid" aria-label="운영 상태">
+          <article class="status-card primary">
+            <span>Market Regime</span>
+            <strong id="opsRiskRegime">-</strong>
+            <small id="opsRiskReason">시장 리스크 상태를 계산 중입니다.</small>
+          </article>
+          <article class="status-card">
+            <span>Target Exposure</span>
+            <strong id="opsExposure">0%</strong>
+            <small id="riskRegimeLabel">liquidity_momentum_v1</small>
+          </article>
+          <article class="status-card">
+            <span>Cash</span>
+            <strong id="accountCash">0</strong>
+            <small id="accountUpdated">계좌 스냅샷 없음</small>
+          </article>
+          <article class="status-card">
+            <span>Total Equity</span>
+            <strong id="accountTotal">0</strong>
+            <small id="accountToday">당일 매수/매도 0 / 0</small>
+          </article>
+          <article class="status-card">
+            <span>Realized P&L</span>
+            <strong id="realizedPnl">0</strong>
+            <small id="winRate">승률 0%</small>
+          </article>
+          <article class="status-card">
+            <span>Order Queue</span>
+            <strong id="orderQueueCount">0</strong>
+            <small id="tradeCount">체결 0건</small>
+          </article>
+        </section>
+
+        <section id="strategy" class="command-grid">
+          <article class="panel command-panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Autopilot Decision</p>
+                <h2>전략 후보</h2>
+              </div>
+              <span id="riskRegime">시장 리스크 미계산</span>
+            </div>
+            <div class="risk-strip">
+              <strong>Risk Overlay</strong>
+              <span id="riskMetrics">전략을 실행하면 하락장 방어 상태가 표시됩니다.</span>
+            </div>
+            <div class="table-wrap strategy-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>종목</th>
+                    <th class="num">점수</th>
+                    <th class="num">목표비중</th>
+                    <th>상태</th>
+                    <th>사유</th>
+                  </tr>
+                </thead>
+                <tbody id="strategySignalsBody"></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="panel queue-panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Execution Preview</p>
+                <h2>리밸런싱 미리보기</h2>
+              </div>
+              <span>지정가 주문</span>
+            </div>
+            <div class="table-wrap table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>종목</th>
+                    <th>구분</th>
+                    <th class="num">수량</th>
+                    <th class="num">주문예상</th>
+                    <th>근거</th>
+                  </tr>
+                </thead>
+                <tbody id="rebalanceOrdersBody"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section class="analytics-grid">
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Performance</p>
+                <h2>손익 추이</h2>
+              </div>
+              <span>최근 30개 거래일</span>
+            </div>
+            <canvas id="pnlChart" height="220" data-chart-height="220"></canvas>
+          </article>
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Account</p>
+                <h2>평가금액</h2>
+              </div>
+              <span>계좌 총평가</span>
+            </div>
+            <canvas id="equityChart" height="220" data-chart-height="220"></canvas>
+          </article>
+        </section>
+
+        <section id="learning" class="data-grid">
+          <article class="panel learning-panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Learning Loop</p>
+                <h2>장 마감 회고</h2>
+              </div>
+              <span id="learningDate">리뷰 없음</span>
+            </div>
+            <div class="learning-summary">
+              <div>
+                <span>Quality Score</span>
+                <strong id="learningQuality">-</strong>
+              </div>
+              <p id="learningSummary">장 마감 리뷰를 실행하면 오늘의 성과와 개선 판단이 표시됩니다.</p>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Adaptive Rules</p>
+                <h2>추천 파라미터</h2>
+              </div>
+              <span>자동 적용 전 검토</span>
+            </div>
+            <div class="table-wrap compact table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>항목</th>
+                    <th class="num">현재</th>
+                    <th class="num">추천</th>
+                    <th>사유</th>
+                  </tr>
+                </thead>
+                <tbody id="learningSuggestionsBody"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section id="execution" class="data-grid">
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Orders</p>
+                <h2>주문 이벤트</h2>
+              </div>
+              <span>당일 주문 상태</span>
+            </div>
+            <div class="table-wrap compact table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>시간</th>
+                    <th>종목</th>
+                    <th>상태</th>
+                    <th class="num">수량</th>
+                    <th>근거</th>
+                  </tr>
+                </thead>
+                <tbody id="ordersBody"></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Trades</p>
+                <h2>당일 체결 내역</h2>
+              </div>
+              <span id="tradeDateLabel"></span>
+            </div>
+            <div class="table-wrap compact table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>시간</th>
+                    <th>종목</th>
+                    <th>구분</th>
+                    <th class="num">금액</th>
+                    <th class="num">손익</th>
+                  </tr>
+                </thead>
+                <tbody id="tradesBody"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section id="account" class="data-grid">
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Portfolio</p>
+                <h2>보유 종목</h2>
+              </div>
+              <span id="accountPnl">평가손익 0</span>
+            </div>
+            <div class="table-wrap compact table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>종목</th>
+                    <th class="num">수량</th>
+                    <th class="num">평가금액</th>
+                    <th class="num">손익</th>
+                  </tr>
+                </thead>
+                <tbody id="holdingsBody"></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article id="market" class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Watchlist</p>
+                <h2>최신 시세</h2>
+              </div>
+              <span>수집 종목</span>
+            </div>
+            <div class="table-wrap compact table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>종목</th>
+                    <th class="num">현재가</th>
+                    <th class="num">등락률</th>
+                    <th class="num">거래량</th>
+                  </tr>
+                </thead>
+                <tbody id="quotesBody"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section class="data-grid slim">
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Market Pulse</p>
+                <h2>거래대금 랭킹</h2>
+              </div>
+              <span>최신 스냅샷</span>
+            </div>
+            <ol id="volumeRank" class="rank-list"></ol>
+          </article>
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Size Filter</p>
+                <h2>시가총액 랭킹</h2>
+              </div>
+              <span>최신 스냅샷</span>
+            </div>
+            <ol id="marketCapRank" class="rank-list"></ol>
+          </article>
+        </section>
+      </main>
+    </div>
+    <script src="/static/app.js?v=20260628-trading-toggle"></script>
+  </body>
+</html>

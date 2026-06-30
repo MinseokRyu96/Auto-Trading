@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.gostop.dashboard</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>cd /Users/minseokryu/GoStopService &amp;&amp; PYTHONPATH=src /Library/Frameworks/Python.framework/Versions/3.14/bin/python3 -m gostop.cli dashboard --host 127.0.0.1 --port 8765</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/minseokryu/GoStopService</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/minseokryu/GoStopService/src</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/minseokryu/GoStopService/artifacts/logs/dashboard.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/minseokryu/GoStopService/artifacts/logs/dashboard.err.log</string>
+</dict>
+</plist>
