@@ -37,6 +37,7 @@ class Settings:
     news_refresh_minutes: int = 30
     news_max_symbol_queries: int = 12
     news_items_per_query: int = 12
+    telegram_summary_minutes: int = 20
     cano: str | None = None
     acnt_prdt_cd: str | None = None
     telegram_bot_token: str | None = None
@@ -84,6 +85,7 @@ def load_settings() -> Settings:
         news_refresh_minutes=int(os.getenv("GOSTOP_NEWS_REFRESH_MINUTES", "30")),
         news_max_symbol_queries=int(os.getenv("GOSTOP_NEWS_MAX_SYMBOL_QUERIES", "12")),
         news_items_per_query=int(os.getenv("GOSTOP_NEWS_ITEMS_PER_QUERY", "12")),
+        telegram_summary_minutes=int(os.getenv("GOSTOP_TELEGRAM_SUMMARY_MINUTES", "20")),
         cano=cano,
         acnt_prdt_cd=product,
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", "").strip() or None,

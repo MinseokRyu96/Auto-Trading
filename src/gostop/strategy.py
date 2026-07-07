@@ -45,6 +45,9 @@ class StrategyConfig:
     affordability_buffer: float = 0.98
     small_account_threshold: float = 1_000_000
     small_account_cash_buffer: float = 0.002
+    small_account_target_positions: int = 3
+    small_account_min_position_value: float = 50_000
+    small_account_max_position_weight: float = 0.45
     news_sentiment_weight: float = 0.10
     news_lookback_hours: int = 6
     news_cash_sweep_enabled: bool = True
@@ -582,7 +585,7 @@ class MomentumStrategy:
             "news_sweep": "뉴스 잔여예산",
         }.get(metric.get("segment"), "코어")
         if metric.get("source") == "news_sweep":
-            reason = f"{segment_text} 슬롯; 남은 예산으로 1주 이상 매수 가능"
+            reason = f"{segment_text} 슬롯; 소액 계좌 집중 배분 후보"
         else:
             reason = (
                 f"{segment_text} 슬롯; "
@@ -676,9 +679,13 @@ class MomentumStrategy:
         if budget <= 0:
             return {}
 
+        candidates = self._small_account_focus_candidates(selected, budget, quotes, holdings)
+        if not candidates:
+            return {}
+
         quantities: dict[str, int] = {}
         remaining = budget
-        for item in selected:
+        for item in candidates:
             symbol = item["symbol"]
             current_value = float(holdings.get(symbol, {}).get("value", 0.0))
             if current_value <= 0:
@@ -686,26 +693,95 @@ class MomentumStrategy:
             quantities[symbol] = math.floor(current_value / max(float(quotes.get(symbol) or 0), 1))
             remaining -= min(current_value, remaining)
 
-        candidates = [item for item in selected if float(quotes.get(item["symbol"]) or 0) > 0]
-        candidates = sorted(candidates, key=lambda item: item.get("score", 0), reverse=True)
-        while candidates:
-            purchased = False
-            for item in candidates:
-                symbol = item["symbol"]
-                price = float(quotes.get(symbol) or 0)
-                if price <= 0 or price > remaining:
-                    continue
-                quantities[symbol] = quantities.get(symbol, 0) + 1
-                remaining -= price
-                purchased = True
-            if not purchased:
+        target_values = self._small_account_target_values(candidates, budget)
+        position_cap = budget * self.config.small_account_max_position_weight
+        while remaining > 0:
+            choice = self._next_whole_share_candidate(candidates, quantities, quotes, target_values, position_cap, remaining)
+            if choice is None:
                 break
+            symbol = choice["symbol"]
+            price = float(quotes.get(symbol) or 0)
+            quantities[symbol] = quantities.get(symbol, 0) + 1
+            remaining -= price
 
         return {
             symbol: round((quantity * float(quotes[symbol])) / capital, 6)
             for symbol, quantity in quantities.items()
             if quantity > 0 and symbol in quotes
         }
+
+    def _small_account_focus_candidates(
+        self,
+        selected: list[dict[str, Any]],
+        budget: float,
+        quotes: dict[str, float],
+        holdings: dict[str, dict[str, float]],
+    ) -> list[dict[str, Any]]:
+        candidates = sorted(
+            [item for item in selected if float(quotes.get(item["symbol"]) or 0) > 0],
+            key=lambda item: item.get("score", 0),
+            reverse=True,
+        )
+        if not candidates:
+            return []
+
+        min_position_value = max(float(self.config.small_account_min_position_value or 0), 1.0)
+        max_by_budget = max(1, math.floor(budget / min_position_value)) if budget >= min_position_value else 1
+        limit = max(1, min(self.config.small_account_target_positions, max_by_budget, len(candidates)))
+        position_cap = budget * self.config.small_account_max_position_weight
+
+        affordable = [item for item in candidates if float(quotes.get(item["symbol"]) or 0) <= position_cap]
+        if not affordable:
+            affordable = [item for item in candidates if float(quotes.get(item["symbol"]) or 0) <= budget]
+
+        held = [
+            item
+            for item in affordable
+            if float(holdings.get(item["symbol"], {}).get("value", 0.0)) > 0
+        ]
+        held_symbols = {item["symbol"] for item in held}
+        focus = [*held, *[item for item in affordable if item["symbol"] not in held_symbols]]
+        return focus[:limit]
+
+    def _small_account_target_values(self, candidates: list[dict[str, Any]], budget: float) -> dict[str, float]:
+        score_sum = sum(max(float(item.get("score") or 0), 0.01) for item in candidates)
+        position_cap = budget * self.config.small_account_max_position_weight
+        return {
+            item["symbol"]: min(position_cap, budget * max(float(item.get("score") or 0), 0.01) / score_sum)
+            for item in candidates
+        }
+
+    def _next_whole_share_candidate(
+        self,
+        candidates: list[dict[str, Any]],
+        quantities: dict[str, int],
+        quotes: dict[str, float],
+        target_values: dict[str, float],
+        position_cap: float,
+        remaining: float,
+    ) -> dict[str, Any] | None:
+        eligible: list[tuple[float, float, dict[str, Any]]] = []
+        fallback: list[tuple[float, dict[str, Any]]] = []
+        for item in candidates:
+            symbol = item["symbol"]
+            price = float(quotes.get(symbol) or 0)
+            if price <= 0 or price > remaining:
+                continue
+            current_value = quantities.get(symbol, 0) * price
+            if current_value + price > position_cap:
+                continue
+            target_value = target_values.get(symbol, 0.0)
+            score = float(item.get("score") or 0)
+            deficit = target_value - current_value
+            if deficit > 0:
+                eligible.append((deficit / max(target_value, price), score, item))
+            fallback.append((score, item))
+
+        if eligible:
+            return max(eligible, key=lambda row: (row[0], row[1]))[2]
+        if fallback:
+            return max(fallback, key=lambda row: row[0])[1]
+        return None
 
     def _deployable_weight(self, capital: float, exposure_multiplier: float) -> float:
         if exposure_multiplier <= 0:

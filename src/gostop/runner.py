@@ -55,6 +55,7 @@ class MarketRunner:
         self._last_cycle_at: datetime | None = None
         self._last_rank_date: date | None = None
         self._last_news_at: datetime | None = None
+        self._last_summary_sent_at: datetime | None = None
 
     def run_forever(self) -> None:
         print(
@@ -135,7 +136,8 @@ class MarketRunner:
             ),
             flush=True,
         )
-        self.notifier.send_cycle_summary(
+        self._send_cycle_summary_if_due(
+            now,
             {
                 "cash_amount": account.get("cash_amount") if account else None,
                 "total_eval_amount": account.get("total_eval_amount") if account else None,
@@ -147,9 +149,18 @@ class MarketRunner:
                 "news_rows": news_rows,
                 "executions": pre_sync.executions + post_sync.executions,
                 "new_executions": pre_sync.new_executions + post_sync.new_executions,
-            }
+            },
         )
         self.notifier.send_order_events(order_events)
+
+    def _send_cycle_summary_if_due(self, now: datetime, payload: dict[str, object]) -> None:
+        interval = max(int(self.settings.telegram_summary_minutes or 0), 1)
+        if self._last_summary_sent_at is not None:
+            elapsed = now - self._last_summary_sent_at
+            if elapsed < timedelta(minutes=interval):
+                return
+        self.notifier.send_cycle_summary(payload)
+        self._last_summary_sent_at = now
 
     def _sync_executions_if_possible(self, now: datetime) -> ExecutionSyncResult:
         if not self.settings.cano or not self.settings.acnt_prdt_cd:
