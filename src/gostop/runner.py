@@ -56,6 +56,7 @@ class MarketRunner:
         self._last_rank_date: date | None = None
         self._last_news_at: datetime | None = None
         self._last_summary_sent_at: datetime | None = None
+        self._last_non_fill_order_notice_at: datetime | None = None
 
     def run_forever(self) -> None:
         print(
@@ -151,7 +152,7 @@ class MarketRunner:
                 "new_executions": pre_sync.new_executions + post_sync.new_executions,
             },
         )
-        self.notifier.send_order_events(order_events)
+        self._send_order_events_with_throttle(now, order_events)
 
     def _send_cycle_summary_if_due(self, now: datetime, payload: dict[str, object]) -> None:
         interval = max(int(self.settings.telegram_summary_minutes or 0), 1)
@@ -161,6 +162,27 @@ class MarketRunner:
                 return
         self.notifier.send_cycle_summary(payload)
         self._last_summary_sent_at = now
+
+    def _send_order_events_with_throttle(self, now: datetime, rows: list[dict[str, object]]) -> None:
+        if not rows:
+            return
+
+        filled_rows = [row for row in rows if is_filled_order_event(row)]
+        non_fill_rows = [row for row in rows if not is_filled_order_event(row)]
+        rows_to_send = list(filled_rows)
+
+        if non_fill_rows and self._is_non_fill_order_notice_due(now):
+            rows_to_send.extend(non_fill_rows)
+            self._last_non_fill_order_notice_at = now
+
+        if rows_to_send:
+            self.notifier.send_order_events(rows_to_send)
+
+    def _is_non_fill_order_notice_due(self, now: datetime) -> bool:
+        interval = max(int(self.settings.telegram_order_notice_minutes or 0), 1)
+        if self._last_non_fill_order_notice_at is None:
+            return True
+        return now - self._last_non_fill_order_notice_at >= timedelta(minutes=interval)
 
     def _sync_executions_if_possible(self, now: datetime) -> ExecutionSyncResult:
         if not self.settings.cano or not self.settings.acnt_prdt_cd:
@@ -259,6 +281,11 @@ class MarketRunner:
 def parse_hhmm(value: str) -> clock_time:
     hour, minute = value.split(":", 1)
     return clock_time(int(hour), int(minute))
+
+
+def is_filled_order_event(row: dict[str, object]) -> bool:
+    status = str(row.get("status") or "").lower()
+    return status in {"filled", "partial_filled"}
 
 
 def load_runner_symbols(store: Store, symbols_file: str) -> list[str]:
